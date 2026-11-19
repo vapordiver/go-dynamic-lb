@@ -49,7 +49,7 @@ func loadConfig() (*config, error) {
 
 	delay, err := time.ParseDuration(delayString)
 	if err != nil {
-		return nil, fmt.Errorf("could not parse delay from env: %v", err.Error())
+		return nil, fmt.Errorf("could not parse delay from env: %w", err)
 	}
 
 	cfg := &config{

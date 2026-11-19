@@ -155,7 +155,7 @@ func main() {
 
 	logger = logger.With(slog.String("hostname", cfg.instanceID))
 
-	srv := NewServer(logger, cfg)
+	srv := newServer(logger, cfg)
 
 	srv.logger.Info("Listening for connections.", "addr", srv.server.Addr)
 

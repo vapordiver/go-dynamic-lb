@@ -1,9 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,6 +10,29 @@ import (
 
 	"github.com/joho/godotenv"
 )
+
+type api struct {
+	logger   *slog.Logger
+	hostname string
+	server   *http.Server
+}
+
+func initializeLogger() *slog.Logger {
+	opts := &slog.HandlerOptions{
+		Level: slog.LevelDebug,
+	}
+
+	var logger *slog.Logger
+
+	handlerType, _ := os.LookupEnv("LOG_FORMAT")
+	if handlerType == "text" {
+		logger = slog.New(slog.NewTextHandler(os.Stdout, opts))
+	} else {
+		logger = slog.New(slog.NewJSONHandler(os.Stdout, opts))
+	}
+
+	return logger
+}
 
 func getHostname() string {
 	hostname, _ := os.LookupEnv("INSTANCE_ID")
@@ -21,34 +43,30 @@ func getHostname() string {
 	return hostname
 }
 
-func getHealthz(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("got /healthz request")
-
-	hostname := getHostname()
+func (a *api) getHealthz(w http.ResponseWriter, r *http.Request) {
+	a.logger.Info("Got /healthz request")
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("X-Served-By", hostname)
+	w.Header().Set("X-Served-By", a.hostname)
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, "Status: OK\n")
-	io.WriteString(w, "Host: "+hostname+"\n")
+	io.WriteString(w, "Host: "+a.hostname+"\n")
 }
 
-func simulateWork(w http.ResponseWriter, r *http.Request) {
+func (a *api) simulateWork(w http.ResponseWriter, r *http.Request) {
 	query, _ := url.ParseQuery(r.URL.RawQuery)
 
 	delay, err := time.ParseDuration(query.Get("delay"))
 	if err != nil {
-		fmt.Println("no query detected")
+		a.logger.Debug("No query detected.", "query", r.URL.RawQuery)
 		delayString, _ := os.LookupEnv("DELAY")
 		if delayString == "" {
-			fmt.Println("delay is not set. using default value -> 2000ms")
+			a.logger.Debug("Delay is not set. Using default value (2000ms)")
 			delayString = "2000ms"
 		}
 		delay, _ = time.ParseDuration(delayString)
 	}
-	fmt.Println("delay: " + delay.String())
-
-	hostname := getHostname()
+	a.logger.Debug("Delay set.", "delay", delay.String())
 
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
@@ -56,34 +74,49 @@ func simulateWork(w http.ResponseWriter, r *http.Request) {
 	select {
 	case <-timer.C:
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, "Host: "+hostname+"\n")
+		io.WriteString(w, "Host: "+a.hostname+"\n")
 	case <-r.Context().Done():
-		fmt.Println("Connection terminated: ", r.Context().Err())
+		a.logger.Debug("Connection terminated.", "error", r.Context().Err())
 	}
 }
 
-func setupServer() *http.Server {
+func NewServer(logger *slog.Logger, hostname string) *api {
+	logger.Info("SERVER IS SETTING UP...")
+
+	srv := &api{
+		logger:   logger,
+		hostname: hostname,
+	}
+
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /healthz", getHealthz)
-	mux.HandleFunc("GET /work", simulateWork)
+	mux.HandleFunc("GET /healthz", srv.getHealthz)
+	mux.HandleFunc("GET /work", srv.simulateWork)
 
 	port := ":" + os.Getenv("PORT")
 
-	server := &http.Server{
-		Addr:    port,
-		Handler: mux,
+	srv.server = &http.Server{
+		Addr:         port,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 
-	return server
+	return srv
 }
 
 func main() {
 	godotenv.Load()
 
-	server := setupServer()
+	logger := initializeLogger()
+	hostname := getHostname()
 
-	if err := server.ListenAndServe(); err != nil {
-		log.Fatal(err)
+	srv := NewServer(logger.With(slog.String("hostname", hostname)), hostname)
+
+	srv.logger.Info("Listening for connections.", "addr", srv.server.Addr)
+
+	if err := srv.server.ListenAndServe(); err != nil {
+		srv.logger.Error("Error while shutting down", "error", err)
+		os.Exit(1)
 	}
 }

@@ -12,12 +12,20 @@ import (
 	"github.com/joho/godotenv"
 )
 
-func getHealthz(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("got /healthz request")
+func getHostname() string {
 	hostname, _ := os.LookupEnv("INSTANCE_ID")
 	if hostname == "" {
 		hostname, _ = os.Hostname()
 	}
+
+	return hostname
+}
+
+func getHealthz(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("got /healthz request")
+
+	hostname := getHostname()
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("X-Served-By", hostname)
 	w.WriteHeader(http.StatusOK)
@@ -40,10 +48,7 @@ func simulateWork(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Println("delay: " + delay.String())
 
-	hostname, _ := os.LookupEnv("INSTANCE_ID")
-	if hostname == "" {
-		hostname, _ = os.Hostname()
-	}
+	hostname := getHostname()
 
 	timer := time.NewTimer(delay)
 	defer timer.Stop()

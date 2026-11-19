@@ -117,7 +117,7 @@ func (a *api) simulateWork(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func NewServer(logger *slog.Logger, cfg *config) *api {
+func newServer(logger *slog.Logger, cfg *config) *api {
 	logger.Info("SERVER IS SETTING UP...")
 
 	srv := &api{

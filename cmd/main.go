@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -12,20 +14,63 @@ import (
 )
 
 type api struct {
-	logger   *slog.Logger
-	hostname string
-	server   *http.Server
+	logger *slog.Logger
+	server *http.Server
+	cfg    *config
 }
 
-func initializeLogger() *slog.Logger {
+type config struct {
+	instanceID string
+	port       string
+	logFormat  string
+	delay      time.Duration
+}
+
+func loadConfig() (*config, error) {
+
+	instanceID := os.Getenv("INSTANCE_ID")
+	if instanceID == "" {
+		instanceID, _ = os.Hostname()
+	}
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		return nil, errors.New("port is not set")
+	}
+
+	logFormat := os.Getenv("LOG_FORMAT")
+	if logFormat != "text" && logFormat != "json" {
+		return nil, fmt.Errorf("log_format should be set either to text or json. log_format: %v", logFormat)
+	}
+
+	delayString := os.Getenv("DELAY")
+	if delayString == "" {
+		delayString = "2000ms"
+	}
+
+	delay, err := time.ParseDuration(delayString)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse delay from env: %v", err.Error())
+	}
+
+	cfg := &config{
+		port:       port,
+		instanceID: instanceID,
+		delay:      delay,
+		logFormat:  logFormat,
+	}
+
+	return cfg, nil
+}
+
+func initializeLogger(cfg *config) *slog.Logger {
 	opts := &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	}
 
 	var logger *slog.Logger
 
-	handlerType, _ := os.LookupEnv("LOG_FORMAT")
-	if handlerType == "text" {
+	if cfg.logFormat == "text" {
 		logger = slog.New(slog.NewTextHandler(os.Stdout, opts))
 	} else {
 		logger = slog.New(slog.NewJSONHandler(os.Stdout, opts))
@@ -34,23 +79,14 @@ func initializeLogger() *slog.Logger {
 	return logger
 }
 
-func getHostname() string {
-	hostname, _ := os.LookupEnv("INSTANCE_ID")
-	if hostname == "" {
-		hostname, _ = os.Hostname()
-	}
-
-	return hostname
-}
-
 func (a *api) getHealthz(w http.ResponseWriter, r *http.Request) {
 	a.logger.Info("Got /healthz request")
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.Header().Set("X-Served-By", a.hostname)
+	w.Header().Set("X-Served-By", a.cfg.instanceID)
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, "Status: OK\n")
-	io.WriteString(w, "Host: "+a.hostname+"\n")
+	io.WriteString(w, "Host: "+a.cfg.instanceID+"\n")
 }
 
 func (a *api) simulateWork(w http.ResponseWriter, r *http.Request) {
@@ -58,13 +94,8 @@ func (a *api) simulateWork(w http.ResponseWriter, r *http.Request) {
 
 	delay, err := time.ParseDuration(query.Get("delay"))
 	if err != nil {
-		a.logger.Debug("No query detected.", "query", r.URL.RawQuery)
-		delayString, _ := os.LookupEnv("DELAY")
-		if delayString == "" {
-			a.logger.Debug("Delay is not set. Using default value (2000ms)")
-			delayString = "2000ms"
-		}
-		delay, _ = time.ParseDuration(delayString)
+		a.logger.Debug("No query detected. Using default value.", "query", r.URL.RawQuery)
+		delay = a.cfg.delay
 	}
 	a.logger.Debug("Delay set.", "delay", delay.String())
 
@@ -74,18 +105,18 @@ func (a *api) simulateWork(w http.ResponseWriter, r *http.Request) {
 	select {
 	case <-timer.C:
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, "Host: "+a.hostname+"\n")
+		io.WriteString(w, "Host: "+a.cfg.instanceID+"\n")
 	case <-r.Context().Done():
 		a.logger.Debug("Connection terminated.", "error", r.Context().Err())
 	}
 }
 
-func NewServer(logger *slog.Logger, hostname string) *api {
+func NewServer(logger *slog.Logger, cfg *config) *api {
 	logger.Info("SERVER IS SETTING UP...")
 
 	srv := &api{
-		logger:   logger,
-		hostname: hostname,
+		logger: logger,
+		cfg:    cfg,
 	}
 
 	mux := http.NewServeMux()
@@ -93,7 +124,7 @@ func NewServer(logger *slog.Logger, hostname string) *api {
 	mux.HandleFunc("GET /healthz", srv.getHealthz)
 	mux.HandleFunc("GET /work", srv.simulateWork)
 
-	port := ":" + os.Getenv("PORT")
+	port := ":" + srv.cfg.port
 
 	srv.server = &http.Server{
 		Addr:         port,
@@ -108,14 +139,21 @@ func NewServer(logger *slog.Logger, hostname string) *api {
 func main() {
 	godotenv.Load()
 
-	logger := initializeLogger()
-	hostname := getHostname()
+	cfg, err := loadConfig()
+	if err != nil {
+		slog.Error("Config error.", "error", err)
+		os.Exit(1)
+	}
 
-	srv := NewServer(logger.With(slog.String("hostname", hostname)), hostname)
+	logger := initializeLogger(cfg)
+
+	logger = logger.With(slog.String("hostname", cfg.instanceID))
+
+	srv := NewServer(logger, cfg)
 
 	srv.logger.Info("Listening for connections.", "addr", srv.server.Addr)
 
-	if err := srv.server.ListenAndServe(); err != nil {
+	if err = srv.server.ListenAndServe(); err != nil {
 		srv.logger.Error("Error while shutting down", "error", err)
 		os.Exit(1)
 	}

@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"time"
 
@@ -90,20 +89,27 @@ func (a *api) getHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) simulateWork(w http.ResponseWriter, r *http.Request) {
-	query, _ := url.ParseQuery(r.URL.RawQuery)
+	a.logger.Info("Got /work request")
+	delay := a.cfg.delay
 
-	delay, err := time.ParseDuration(query.Get("delay"))
-	if err != nil {
-		a.logger.Debug("No query detected. Using default value.", "query", r.URL.RawQuery)
-		delay = a.cfg.delay
+	if delayString := r.URL.Query().Get("delay"); delayString != "" {
+		var err error
+		delay, err = time.ParseDuration(delayString)
+		if err != nil || delay < 0 {
+			a.logger.Warn("Incorrect query.", "endpoint", r.Pattern, "query", r.URL.RawQuery, "err", err)
+			w.WriteHeader(http.StatusBadRequest)
+			io.WriteString(w, "Incorrect query.\n")
+			return
+		}
 	}
-	a.logger.Debug("Delay set.", "delay", delay.String())
 
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 
 	select {
 	case <-timer.C:
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("X-Served-By", a.cfg.instanceID)
 		w.WriteHeader(http.StatusOK)
 		io.WriteString(w, "Host: "+a.cfg.instanceID+"\n")
 	case <-r.Context().Done():

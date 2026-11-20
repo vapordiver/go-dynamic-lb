@@ -90,8 +90,19 @@ func initializeLogger(cfg *config) *slog.Logger {
 	return logger
 }
 
-func (a *api) getHealthz(w http.ResponseWriter, r *http.Request) {
+func (a *api) healthzHandler(w http.ResponseWriter, r *http.Request) {
 	a.logger.Info("Got /healthz request")
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Served-By", a.cfg.instanceID)
+
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, "Status: OK\n")
+	io.WriteString(w, "Host: "+a.cfg.instanceID+"\n")
+}
+
+func (a *api) readyzHandler(w http.ResponseWriter, r *http.Request) {
+	a.logger.Info("Got /readyz request")
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.Header().Set("X-Served-By", a.cfg.instanceID)
@@ -150,7 +161,8 @@ func newServer(logger *slog.Logger, cfg *config) (*api, context.CancelFunc) {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /healthz", srv.getHealthz)
+	mux.HandleFunc("GET /healthz", srv.healthzHandler)
+	mux.HandleFunc("GET /readyz", srv.readyzHandler)
 	mux.HandleFunc("GET /work", srv.simulateWork)
 
 	port := ":" + srv.cfg.port

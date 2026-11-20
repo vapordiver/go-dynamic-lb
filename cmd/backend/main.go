@@ -118,7 +118,7 @@ func (a *api) readyzHandler(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, "Host: "+a.cfg.instanceID+"\n")
 }
 
-func (a *api) simulateWork(w http.ResponseWriter, r *http.Request) {
+func (a *api) workHandler(w http.ResponseWriter, r *http.Request) {
 	a.logger.Info("Got /work request")
 	delay := a.cfg.delay
 
@@ -163,7 +163,7 @@ func newServer(logger *slog.Logger, cfg *config) (*api, context.CancelFunc) {
 
 	mux.HandleFunc("GET /healthz", srv.healthzHandler)
 	mux.HandleFunc("GET /readyz", srv.readyzHandler)
-	mux.HandleFunc("GET /work", srv.simulateWork)
+	mux.HandleFunc("GET /work", srv.workHandler)
 
 	port := ":" + srv.cfg.port
 

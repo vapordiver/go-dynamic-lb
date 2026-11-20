@@ -211,7 +211,18 @@ func main() {
 		close(srvErrChan)
 	}()
 
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+
+	case e, ok := <-srvErrChan:
+		if ok {
+			srv.logger.Error("Server has stopped for unknown reason.", "error", e)
+			stop()
+			stopOngoingGracefully()
+			os.Exit(1)
+		}
+	}
+
 	stop()
 	srv.isShuttingDown.Store(true)
 	srv.logger.Info("Received shutdown signal - shutting down...")
@@ -226,12 +237,6 @@ func main() {
 	if err != nil {
 		srv.logger.Error("Grace period has completed but server still has not shut down gracefully. Waiting for forced cancellation.")
 		time.Sleep(shutdownForcePeriod)
-	}
-
-	e, ok := <-srvErrChan
-	if ok {
-		srv.logger.Error("Server has stopped for unknown reason.", "error", e)
-		os.Exit(1)
 	}
 
 	srv.logger.Info("Server shut down gracefully.")

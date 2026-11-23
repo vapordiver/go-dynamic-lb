@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+var hopHeaders = []string{
+	"Connection",
+	"Keep-Alive",
+	"Proxy-Authenticate",
+	"Proxy-Authorization",
+	"Te",
+	"Trailers",
+	"Transfer-Encoding",
+	"Upgrade",
+}
+
 type RevProxy struct {
 	transport http.RoundTripper
 }

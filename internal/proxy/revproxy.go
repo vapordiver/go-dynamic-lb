@@ -3,6 +3,7 @@ package revproxy
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -69,4 +70,25 @@ func (rp *RevProxy) Forward(w http.Response, r *http.Request, target *url.URL) (
 	// copy stream of response to writer
 
 	return resp.StatusCode, err
+}
+
+func cleanHopByHop(h http.Header) {
+	var tokens []string
+	for _, line := range h.Values("Connection") {
+		vals := strings.Split(line, ",")
+		for _, val := range vals {
+			if connHeader := strings.TrimSpace(val); connHeader != "" {
+				tokens = append(tokens, connHeader)
+			}
+		}
+	}
+
+	for _, token := range tokens {
+		h.Del(token)
+	}
+
+	for _, hopHeader := range hopHeaders {
+		h.Del(hopHeader)
+	}
+
 }

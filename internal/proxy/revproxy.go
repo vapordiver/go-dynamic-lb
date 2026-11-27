@@ -45,7 +45,7 @@ func NewDefault() *RevProxy {
 	return proxy
 }
 
-func (rp *RevProxy) Forward(w http.Response, r *http.Request, target *url.URL) (int, error) {
+func (rp *RevProxy) Forward(w http.ResponseWriter, r *http.Request, target *url.URL) (int, error) {
 	outReq := r.Clone(r.Context())
 
 	outReq.URL.Scheme = target.Scheme

@@ -1,4 +1,4 @@
-package revproxy
+package proxy
 
 import (
 	"context"
@@ -27,19 +27,19 @@ var hopHeaders = []string{
 	"Upgrade",
 }
 
-type RevProxy struct {
+type ReverseProxy struct {
 	transport http.RoundTripper
 }
 
-func New(transport http.RoundTripper) *RevProxy {
-	proxy := &RevProxy{
+func New(transport http.RoundTripper) *ReverseProxy {
+	proxy := &ReverseProxy{
 		transport: transport,
 	}
 
 	return proxy
 }
 
-func NewDefault() *RevProxy {
+func NewDefault() *ReverseProxy {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 
 	transport.MaxIdleConns = 100
@@ -50,7 +50,7 @@ func NewDefault() *RevProxy {
 	return New(transport)
 }
 
-func (rp *RevProxy) Forward(w http.ResponseWriter, r *http.Request, target *url.URL) (int, error) {
+func (rp *ReverseProxy) Forward(w http.ResponseWriter, r *http.Request, target *url.URL) (int, error) {
 	outReq := r.Clone(r.Context())
 
 	outReq.URL.Scheme = target.Scheme

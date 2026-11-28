@@ -47,11 +47,7 @@ func NewDefault() *RevProxy {
 	transport.IdleConnTimeout = 10 * time.Second
 	transport.ResponseHeaderTimeout = 5 * time.Second
 
-	proxy := &RevProxy{
-		transport: transport,
-	}
-
-	return proxy
+	return New(transport)
 }
 
 func (rp *RevProxy) Forward(w http.ResponseWriter, r *http.Request, target *url.URL) (int, error) {

@@ -1,10 +1,19 @@
 package revproxy
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+)
+
+const (
+	StatusClientClosed = 499
 )
 
 var hopHeaders = []string{
@@ -50,26 +59,57 @@ func (rp *RevProxy) Forward(w http.ResponseWriter, r *http.Request, target *url.
 
 	outReq.URL.Scheme = target.Scheme
 	outReq.URL.Host = target.Host
+	outReq.Host = target.Host
 
 	outReq.RequestURI = ""
 	outReq.Close = false
 
-	// clean hop-by-hop
-	// X-Forwarded-For ...
+	cleanHopByHop(outReq.Header)
+	outReq.Header.Add("X-Forwarded-Host", r.Host)
+	clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err == nil {
+		forwardedIPs := strings.Join(outReq.Header.Values("X-Forwarded-For"), ", ")
+		if forwardedIPs != "" {
+			clientIP = forwardedIPs + ", " + clientIP
+		}
+		outReq.Header.Set("X-Forwarded-For", clientIP)
+	}
 
 	resp, err := rp.transport.RoundTrip(outReq)
 	if err != nil {
-		// do something
+		if errors.Is(err, context.Canceled) || errors.Is(outReq.Context().Err(), context.Canceled) {
+			return StatusClientClosed, err
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			// 504 Gateway Timeout
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return http.StatusGatewayTimeout, err
+		}
+		// 502 Bad Gateway, etc.
+		w.WriteHeader(http.StatusBadGateway)
+		return http.StatusBadGateway, err
+
 	}
 
 	defer resp.Body.Close()
 
-	// clean hop-by-hop
-	// Add() each header from resp to writer
-	// set status code
-	// copy stream of response to writer
+	cleanHopByHop(resp.Header)
+	for header, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(header, value)
+		}
+	}
 
-	return resp.StatusCode, err
+	w.WriteHeader(resp.StatusCode)
+
+	_, err = io.Copy(w, resp.Body)
+	if err != nil {
+		// in case streaming body to response fails, return an adequate error
+		return resp.StatusCode, fmt.Errorf("(RevProxy Forward) failed to stream body back to response: %w", err)
+	}
+
+	return resp.StatusCode, nil
 }
 
 func cleanHopByHop(h http.Header) {
